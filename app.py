@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import pymongo
 from pydantic import BaseModel
@@ -15,11 +15,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 app = FastAPI()
 
@@ -69,6 +67,12 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Verify API key from request headers
+def verify_api_key(request: Request):
+    api_key = request.headers.get("x-api-key")
+    if api_key != os.getenv("API_PASSWORD"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
 @app.websocket("/ws/{code}")
 async def websocket_endpoint(websocket: WebSocket, code: str):
     await manager.connect(websocket)
@@ -78,7 +82,7 @@ async def websocket_endpoint(websocket: WebSocket, code: str):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-@app.post("/create_game/")
+@app.post("/create_game/", dependencies=[Depends(verify_api_key)])
 async def create_game(game: Game):
     try:
         games_collection.insert_one(game.dict())
@@ -99,7 +103,7 @@ async def get_game(code: str):
         logger.error(f"Error fetching game: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-@app.post("/game/{code}/guess")
+@app.post("/game/{code}/guess", dependencies=[Depends(verify_api_key)])
 async def add_guess(code: str, guess: Guess):
     try:
         game = games_collection.find_one({"code": code})
