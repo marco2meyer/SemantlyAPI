@@ -7,7 +7,18 @@ from datetime import datetime
 import json
 import os
 from semantly import similarity
+import ssl
+import logging
+from bson import ObjectId
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
+
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 app = FastAPI()
@@ -20,13 +31,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-mongo_uri = "mongodb+srv://marco:wisket-kebKyc-6zybco@semantly.kblpbvn.mongodb.net/"
-
-
-client = pymongo.MongoClient(mongo_uri)
+mongo_uri = os.getenv("MONGODB_URI")
+client = pymongo.MongoClient(mongo_uri, ssl_cert_reqs=ssl.CERT_NONE)
 db = client["app"]
 games_collection = db["games"]
-
 
 # Define Pydantic models
 class Guess(BaseModel):
@@ -61,7 +69,6 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# WebSocket endpoint for real-time updates
 @app.websocket("/ws/{code}")
 async def websocket_endpoint(websocket: WebSocket, code: str):
     await manager.connect(websocket)
@@ -71,45 +78,56 @@ async def websocket_endpoint(websocket: WebSocket, code: str):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# Endpoint to create a new game
 @app.post("/create_game/")
 async def create_game(game: Game):
-    games_collection.insert_one(game.dict())
-    return {"message": "Game created"}
+    try:
+        games_collection.insert_one(game.dict())
+        return {"message": "Game created"}
+    except Exception as e:
+        logger.error(f"Error creating game: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
-# Endpoint to get the game state by code
 @app.get("/game/{code}")
 async def get_game(code: str):
-    game = games_collection.find_one({"code": code})
-    if game:
-        game["_id"] = str(game["_id"])
-        return game
-    return {"message": "Game not found"}
+    try:
+        game = games_collection.find_one({"code": code})
+        if game:
+            game["_id"] = str(game["_id"])  # Convert ObjectId to string
+            return game
+        return {"message": "Game not found"}
+    except Exception as e:
+        logger.error(f"Error fetching game: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
-# Endpoint to add a guess to a game
 @app.post("/game/{code}/guess")
 async def add_guess(code: str, guess: Guess):
-    game = games_collection.find_one({"code": code})
-    if game:
-        # Generate a timestamp for the guess
-        guess.timestamp = datetime.utcnow()
-        score = similarity(guess.guess, game["secret_word"])
-        # Append the guess with timestamp to the user_guesses list
-        game["user_guesses"].append({"player": guess.player, "guess": guess.guess, "score": score, "timestamp": guess.timestamp})
-        if score > 0.95:
-            game["won"] = True
-        games_collection.update_one({"code": code}, {"$set": game})
-        await manager.broadcast(json.dumps(game))
-        return {"message": "Guess added", "game": game}
-    return {"message": "Game not found"}
+    try:
+        game = games_collection.find_one({"code": code})
+        if game:
+            guess.timestamp = datetime.utcnow()
+            score = similarity(guess.guess, game["secret_word"])
+            game["user_guesses"].append({"player": guess.player, "guess": guess.guess, "score": score, "timestamp": guess.timestamp})
+            if score > 0.95:
+                game["won"] = True
+            games_collection.update_one({"code": code}, {"$set": game})
+            game["_id"] = str(game["_id"])  # Convert ObjectId to string
+            await manager.broadcast(json.dumps(game, default=str))
+            return {"message": "Guess added", "game": game}
+        return {"message": "Game not found"}
+    except Exception as e:
+        logger.error(f"Error adding guess: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
-# Endpoint to get all games (for debugging purposes)
 @app.get("/games")
 async def get_all_games():
-    games = list(games_collection.find())
-    for game in games:
-        game["_id"] = str(game["_id"])
-    return games
+    try:
+        games = list(games_collection.find())
+        for game in games:
+            game["_id"] = str(game["_id"])  # Convert ObjectId to string
+        return games
+    except Exception as e:
+        logger.error(f"Error fetching all games: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # Run the FastAPI application
 if __name__ == "__main__":
