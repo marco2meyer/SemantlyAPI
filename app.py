@@ -103,6 +103,7 @@ async def get_game(code: str):
         logger.error(f"Error fetching game: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+
 @app.post("/game/{code}/guess", dependencies=[Depends(verify_api_key)])
 async def add_guess(code: str, guess: Guess):
     try:
@@ -120,6 +121,18 @@ async def add_guess(code: str, guess: Guess):
         return {"message": "Game not found"}
     except Exception as e:
         logger.error(f"Error adding guess: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@app.get("/game/{code}/guesses")
+async def get_guesses(code: str):
+    try:
+        game = games_collection.find_one({"code": code})
+        if game:
+            game["_id"] = str(game["_id"])  # Convert ObjectId to string
+            return {"user_guesses": game["user_guesses"]}
+        return {"message": "Game not found"}
+    except Exception as e:
+        logger.error(f"Error fetching user guesses: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @app.get("/games")
