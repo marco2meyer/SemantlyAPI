@@ -60,4 +60,4 @@ weasel==0.4.1
 websockets==12.0
 wrapt==1.16.0
 gunicorn
-en-core-web-md==3.7.1
+#en-core-web-md==3.7.1
