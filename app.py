@@ -87,13 +87,11 @@ async def websocket_endpoint(websocket: WebSocket, code: str):
 async def create_game(game: Game):
     try:
         # Calculate similarity scores for preset guesses and add them to preset_guesses
-        preset_guesses_with_scores = [
-            Guess(player="preset", guess=guess, score=similarity(guess, game.secret_word) * 100, timestamp=datetime.utcnow())
-            for guess in game.preset_guesses
-        ]
-        game.preset_guesses = preset_guesses_with_scores
+        for guess in game.preset_guesses:
+            guess.score = similarity(guess.guess, game.secret_word) * 100
+            guess.timestamp = datetime.utcnow()
         
-        games_collection.insert_one(game.dict())
+        games_collection.insert_one(game.dict(by_alias=True))
         return {"message": "Game created"}
     except Exception as e:
         logger.error(f"Error creating game: {e}")
