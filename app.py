@@ -38,16 +38,17 @@ games_collection = db["games"]
 class Guess(BaseModel):
     player: str
     guess: str
+    score: float = None
     timestamp: datetime = None
 
 class Game(BaseModel):
     code: str
     secret_word: str
-    preset_guesses: List[str]
+    preset_guesses: List[Guess] = []
     max_guesses: int
-    user_guesses: List[Guess]
+    user_guesses: List[Guess] = []
     players: List[str]
-    won: bool
+    won: bool = False
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -85,6 +86,13 @@ async def websocket_endpoint(websocket: WebSocket, code: str):
 @app.post("/create_game/", dependencies=[Depends(verify_api_key)])
 async def create_game(game: Game):
     try:
+        # Calculate similarity scores for preset guesses and add them to preset_guesses
+        preset_guesses_with_scores = [
+            Guess(player="preset", guess=guess, score=similarity(guess, game.secret_word) * 100, timestamp=datetime.utcnow())
+            for guess in game.preset_guesses
+        ]
+        game.preset_guesses = preset_guesses_with_scores
+        
         games_collection.insert_one(game.dict())
         return {"message": "Game created"}
     except Exception as e:
@@ -103,16 +111,15 @@ async def get_game(code: str):
         logger.error(f"Error fetching game: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-
 @app.post("/game/{code}/guess", dependencies=[Depends(verify_api_key)])
 async def add_guess(code: str, guess: Guess):
     try:
         game = games_collection.find_one({"code": code})
         if game:
             guess.timestamp = datetime.utcnow()
-            score = similarity(guess.guess, game["secret_word"])
-            game["user_guesses"].append({"player": guess.player, "guess": guess.guess, "score": score, "timestamp": guess.timestamp})
-            if score > 0.95:
+            guess.score = similarity(guess.guess, game["secret_word"]) * 100
+            game["user_guesses"].append(guess.dict())
+            if guess.score > 95:
                 game["won"] = True
             games_collection.update_one({"code": code}, {"$set": game})
             game["_id"] = str(game["_id"])  # Convert ObjectId to string
