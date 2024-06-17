@@ -137,11 +137,13 @@ async def add_guess(code: str, guess: Guess):
             }
             await manager.broadcast(code, json.dumps(broadcast_message))
             return {"message": "Guess added", "game": game}
-        return {"message": "Game not found"}
+        else:
+            logger.error(f"Game not found for code: {code}")
+            return {"message": "Game not found"}
     except Exception as e:
         logger.error(f"Error adding guess: {e}")
-        raise HTTPException(status_code=500, detail=e)
-
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+    
 @app.get("/game/{code}/guesses")
 async def get_guesses(code: str):
     try:
