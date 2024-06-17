@@ -140,7 +140,7 @@ async def add_guess(code: str, guess: Guess):
         return {"message": "Game not found"}
     except Exception as e:
         logger.error(f"Error adding guess: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        raise HTTPException(status_code=500, detail=e)
 
 @app.get("/game/{code}/guesses")
 async def get_guesses(code: str):
