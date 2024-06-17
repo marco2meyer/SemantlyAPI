@@ -131,7 +131,7 @@ async def add_guess(code: str, guess: Guess):
                 game["won"] = True
             games_collection.update_one({"code": code}, {"$set": game})
             game["_id"] = str(game["_id"])  # Convert ObjectId to string
-            await manager.broadcast(code, json.dumps(game, default=str))
+            await manager.broadcast(code, json.dumps(guess, default=str))
             return {"message": "Guess added new", "game": game}
         return {"message": "Game not found"}
     except Exception as e:
