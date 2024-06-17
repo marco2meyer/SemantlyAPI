@@ -127,7 +127,7 @@ async def add_guess(code: str, guess: Guess):
             game["_id"] = str(game["_id"])  # Convert ObjectId to string
             await manager.broadcast(f"broadcasting {code}, {guess}")
             await manager.broadcast(json.dumps(game, default=str))
-            return {"message": "Guess added", "game": game}
+            return {"message": "Guess added new", "game": game}
         return {"message": "Game not found"}
     except Exception as e:
         logger.error(f"Error adding guess: {e}")
