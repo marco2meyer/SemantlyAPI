@@ -127,11 +127,16 @@ async def add_guess(code: str, guess: Guess):
             guess.timestamp = datetime.utcnow()
             guess.score = similarity(guess.guess, game["secret_word"]) * 100
             game["user_guesses"].append(guess.dict())
-            if guess.score > 95:
+            won = guess.score > 95
+            if won:
                 game["won"] = True
             games_collection.update_one({"code": code}, {"$set": game})
             game["_id"] = str(game["_id"])  # Convert ObjectId to string
-            await manager.broadcast(code, json.dumps(game, default=str))
+            broadcast_message = {
+                "new_guess": guess.dict(),
+                "won": won
+            }
+            await manager.broadcast(code, json.dumps(broadcast_message))
             return {"message": "Guess added new", "game": game}
         return {"message": "Game not found"}
     except Exception as e:
