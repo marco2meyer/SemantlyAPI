@@ -53,18 +53,23 @@ class Game(BaseModel):
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, code: str):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        if code not in self.active_connections:
+            self.active_connections[code] = []
+        self.active_connections[code].append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+    def disconnect(self, websocket: WebSocket, code: str):
+        self.active_connections[code].remove(websocket)
+        if not self.active_connections[code]:
+            del self.active_connections[code]
 
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
+    async def broadcast(self, code: str, message: str):
+        if code in self.active_connections:
+            for connection in self.active_connections[code]:
+                await connection.send_text(message)
 
 manager = ConnectionManager()
 
@@ -77,15 +82,16 @@ def verify_api_key(request: Request):
 
 @app.websocket("/ws/{code}")
 async def websocket_endpoint(websocket: WebSocket, code: str):
-    await websocket.accept()
+    await manager.connect(websocket, code)
     logger.info(f"WebSocket connection accepted for game: {code}")
     try:
         while True:
             data = await websocket.receive_text()
             logger.info(f"Received data: {data}")
-            await websocket.send_text(f"Echo: {data}")
     except WebSocketDisconnect:
+        manager.disconnect(websocket, code)
         logger.info(f"WebSocket disconnected for game: {code}")
+
 
 @app.post("/create_game/", dependencies=[Depends(verify_api_key)])
 async def create_game(game: Game):
@@ -125,8 +131,7 @@ async def add_guess(code: str, guess: Guess):
                 game["won"] = True
             games_collection.update_one({"code": code}, {"$set": game})
             game["_id"] = str(game["_id"])  # Convert ObjectId to string
-            await manager.broadcast(f"broadcasting {code}, {guess}")
-            await manager.broadcast(json.dumps(game, default=str))
+            await manager.broadcast(code, json.dumps(game, default=str))
             return {"message": "Guess added new", "game": game}
         return {"message": "Game not found"}
     except Exception as e:
