@@ -74,14 +74,18 @@ def verify_api_key(request: Request):
     if api_key != os.getenv("API_PASSWORD"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
+
 @app.websocket("/ws/{code}")
 async def websocket_endpoint(websocket: WebSocket, code: str):
-    await manager.connect(websocket)
+    await websocket.accept()
+    logger.info(f"WebSocket connection accepted for game: {code}")
     try:
         while True:
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            logger.info(f"Received data: {data}")
+            await websocket.send_text(f"Echo: {data}")
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        logger.info(f"WebSocket disconnected for game: {code}")
 
 @app.post("/create_game/", dependencies=[Depends(verify_api_key)])
 async def create_game(game: Game):
