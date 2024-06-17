@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Requ
 from fastapi.middleware.cors import CORSMiddleware
 import pymongo
 from pydantic import BaseModel
-from typing import List
+from typing import Dict, List
 from datetime import datetime
 import json
 import os
