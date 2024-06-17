@@ -92,7 +92,6 @@ async def websocket_endpoint(websocket: WebSocket, code: str):
         manager.disconnect(websocket, code)
         logger.info(f"WebSocket disconnected for game: {code}")
 
-
 @app.post("/create_game/", dependencies=[Depends(verify_api_key)])
 async def create_game(game: Game):
     try:
@@ -137,7 +136,7 @@ async def add_guess(code: str, guess: Guess):
                 "won": won
             }
             await manager.broadcast(code, json.dumps(broadcast_message))
-            return {"message": "Guess added new", "game": game}
+            return {"message": "Guess added", "game": game}
         return {"message": "Game not found"}
     except Exception as e:
         logger.error(f"Error adding guess: {e}")
