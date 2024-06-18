@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Requ
 from fastapi.middleware.cors import CORSMiddleware
 import pymongo
 from pydantic import BaseModel
-from typing import Dict, List
+from typing import List
 from datetime import datetime
 import json
 import os
@@ -11,6 +11,7 @@ import ssl
 import logging
 from bson import ObjectId
 from dotenv import load_dotenv
+from fastapi.encoders import jsonable_encoder
 
 # Load environment variables
 load_dotenv()
@@ -53,23 +54,18 @@ class Game(BaseModel):
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.active_connections: List[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket, code: str):
+    async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        if code not in self.active_connections:
-            self.active_connections[code] = []
-        self.active_connections[code].append(websocket)
+        self.active_connections.append(websocket)
 
-    def disconnect(self, websocket: WebSocket, code: str):
-        self.active_connections[code].remove(websocket)
-        if not self.active_connections[code]:
-            del self.active_connections[code]
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
 
-    async def broadcast(self, code: str, message: str):
-        if code in self.active_connections:
-            for connection in self.active_connections[code]:
-                await connection.send_text(message)
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
 
 manager = ConnectionManager()
 
@@ -79,17 +75,16 @@ def verify_api_key(request: Request):
     if api_key != os.getenv("API_PASSWORD"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
-
 @app.websocket("/ws/{code}")
 async def websocket_endpoint(websocket: WebSocket, code: str):
-    await manager.connect(websocket, code)
+    await websocket.accept()
     logger.info(f"WebSocket connection accepted for game: {code}")
     try:
         while True:
             data = await websocket.receive_text()
             logger.info(f"Received data: {data}")
+            await websocket.send_text(f"Echo: {data}")
     except WebSocketDisconnect:
-        manager.disconnect(websocket, code)
         logger.info(f"WebSocket disconnected for game: {code}")
 
 @app.post("/create_game/", dependencies=[Depends(verify_api_key)])
@@ -125,25 +120,35 @@ async def add_guess(code: str, guess: Guess):
         if game:
             guess.timestamp = datetime.utcnow()
             guess.score = similarity(guess.guess, game["secret_word"]) * 100
-            game["user_guesses"].append(guess.dict())
-            won = guess.score > 95
-            if won:
-                game["won"] = True
-            games_collection.update_one({"code": code}, {"$set": game})
-            game["_id"] = str(game["_id"])  # Convert ObjectId to string
-            broadcast_message = {
-                "new_guess": guess.dict(),
-                "won": won
-            }
-            await manager.broadcast(code, json.dumps(broadcast_message))
+            game["user_guesses"].append({
+                "player": guess.player,
+                "guess": guess.guess,
+                "score": guess.score,
+                "timestamp": guess.timestamp.isoformat()
+            })
+            
+            # Remove the '_id' field from the game object to avoid the immutable field error
+            game_without_id = {k: v for k, v in game.items() if k != "_id"}
+            
+            if guess.score > 95:
+                game_without_id["won"] = True
+            
+            games_collection.update_one({"code": code}, {"$set": game_without_id})
+            
+            guess_data = {"guess": guess.dict(), "won": game_without_id["won"]}
+            message = json.dumps(guess_data, default=str)
+            await manager.broadcast(message)
+            
+            # Convert ObjectId to string for the response
+            game["_id"] = str(game["_id"])
+            
             return {"message": "Guess added", "game": game}
-        else:
-            logger.error(f"Game not found for code: {code}")
-            return {"message": "Game not found"}
+        
+        return {"message": "Game not found"}
     except Exception as e:
         logger.error(f"Error adding guess: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
-    
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
+            
 @app.get("/game/{code}/guesses")
 async def get_guesses(code: str):
     try:
