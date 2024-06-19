@@ -59,13 +59,19 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        logger.info(f"WebSocket connected: {websocket.client}")
+        logger.info(f"Active connections: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
+        logger.info(f"WebSocket disconnected: {websocket.client}")
+        logger.info(f"Active connections: {len(self.active_connections)}")
 
     async def broadcast(self, message: str):
+        logger.info(f"Broadcasting message: {message} to {len(self.active_connections)} connections")
         for connection in self.active_connections:
             await connection.send_text(message)
+            logger.info(f"Message sent to {connection.client}")
 
 manager = ConnectionManager()
 
@@ -77,7 +83,7 @@ def verify_api_key(request: Request):
 
 @app.websocket("/ws/{code}")
 async def websocket_endpoint(websocket: WebSocket, code: str):
-    await websocket.accept()
+    await manager.connect(websocket)
     logger.info(f"WebSocket connection accepted for game: {code}")
     try:
         while True:
@@ -85,12 +91,12 @@ async def websocket_endpoint(websocket: WebSocket, code: str):
             logger.info(f"Received data: {data}")
             await websocket.send_text(f"Echo: {data}")
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
         logger.info(f"WebSocket disconnected for game: {code}")
 
 @app.post("/create_game/", dependencies=[Depends(verify_api_key)])
 async def create_game(game: Game):
     try:
-        # Calculate similarity scores for preset guesses and add them to preset_guesses
         for guess in game.preset_guesses:
             guess.score = similarity(guess.guess, game.secret_word) * 100
             guess.timestamp = datetime.utcnow()
@@ -106,7 +112,7 @@ async def get_game(code: str):
     try:
         game = games_collection.find_one({"code": code})
         if game:
-            game["_id"] = str(game["_id"])  # Convert ObjectId to string
+            game["_id"] = str(game["_id"])
             return game
         return {"message": "Game not found"}
     except Exception as e:
@@ -117,44 +123,31 @@ async def get_game(code: str):
 async def add_guess(code: str, guess: Guess):
     try:
         game = games_collection.find_one({"code": code})
-        if game:
-            guess.timestamp = datetime.utcnow()
-            guess.score = similarity(guess.guess, game["secret_word"]) * 100
-            game["user_guesses"].append({
-                "player": guess.player,
-                "guess": guess.guess,
-                "score": guess.score,
-                "timestamp": guess.timestamp.isoformat()
-            })
-            
-            # Remove the '_id' field from the game object to avoid the immutable field error
-            game_without_id = {k: v for k, v in game.items() if k != "_id"}
-            
-            if guess.score > 95:
-                game_without_id["won"] = True
-            
-            games_collection.update_one({"code": code}, {"$set": game_without_id})
-            
-            guess_data = {"guess": guess.dict(), "won": game_without_id["won"]}
-            message = json.dumps(guess_data, default=str)
-            await manager.broadcast(message)
-            
-            # Convert ObjectId to string for the response
-            game["_id"] = str(game["_id"])
-            
-            return {"message": "Guess added", "game": game}
-        
-        return {"message": "Game not found"}
+        if not game:
+            return {"message": "Game not found"}
+
+        guess.timestamp = datetime.utcnow()
+        guess.score = similarity(guess.guess, game["secret_word"]) * 100
+        game["user_guesses"].append(guess.dict())
+        game_won = False
+        if guess.score > 95:
+            game_won = True
+            game["won"] = True
+
+        games_collection.update_one({"code": code}, {"$set": {"user_guesses": game["user_guesses"], "won": game_won}})
+        broadcast_message = json.dumps({"guess": guess.dict(), "game_won": game_won}, default=str)
+        await manager.broadcast(broadcast_message)
+        return {"message": "Guess added", "guess": guess.dict(), "game_won": game_won}
     except Exception as e:
         logger.error(f"Error adding guess: {e}")
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
-            
+
 @app.get("/game/{code}/guesses")
 async def get_guesses(code: str):
     try:
         game = games_collection.find_one({"code": code})
         if game:
-            game["_id"] = str(game["_id"])  # Convert ObjectId to string
+            game["_id"] = str(game["_id"])
             return {"user_guesses": game["user_guesses"]}
         return {"message": "Game not found"}
     except Exception as e:
@@ -166,7 +159,7 @@ async def get_all_games():
     try:
         games = list(games_collection.find())
         for game in games:
-            game["_id"] = str(game["_id"])  # Convert ObjectId to string
+            game["_id"] = str(game["_id"])
         return games
     except Exception as e:
         logger.error(f"Error fetching all games: {e}")
