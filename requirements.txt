@@ -10,6 +10,8 @@ confection==0.1.5
 cymem==2.0.8
 dnspython==2.6.1
 email_validator==2.1.1
+en-core-web-lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.7.1/en_core_web_lg-3.7.1-py3-none-any.whl
+en-core-web-md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.7.1/en_core_web_md-3.7.1-py3-none-any.whl
 fastapi==0.111.0
 fastapi-cli==0.0.4
 h11==0.14.0
@@ -59,5 +61,3 @@ watchfiles==0.22.0
 weasel==0.4.1
 websockets==12.0
 wrapt==1.16.0
-gunicorn
-#en-core-web-md==3.7.1
