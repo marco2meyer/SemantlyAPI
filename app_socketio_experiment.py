@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import pymongo
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ import logging
 from bson import ObjectId
 from dotenv import load_dotenv
 from fastapi.encoders import jsonable_encoder
+import socketio
 
 # Load environment variables
 load_dotenv()
@@ -29,6 +30,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Set up Socket.IO server
+sio = socketio.AsyncServer(async_mode='asgi')
+app_sio = socketio.ASGIApp(sio, app)
 
 mongo_uri = os.getenv("MONGODB_URI")
 client = pymongo.MongoClient(mongo_uri, ssl_cert_reqs=ssl.CERT_NONE)
@@ -51,48 +56,19 @@ class Game(BaseModel):
     players: List[str]
     won: bool = False
 
-# WebSocket connection manager
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket connected: {websocket.client}")
-        logger.info(f"Active connections: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        logger.info(f"WebSocket disconnected: {websocket.client}")
-        logger.info(f"Active connections: {len(self.active_connections)}")
-
-    async def broadcast(self, message: str):
-        logger.info(f"Broadcasting message: {message} to {len(self.active_connections)} connections")
-        for connection in self.active_connections:
-            await connection.send_text(message)
-            logger.info(f"Message sent to {connection.client}")
-
-manager = ConnectionManager()
-
 # Verify API key from request headers
 def verify_api_key(request: Request):
     api_key = request.headers.get("x-api-key")
     if api_key != os.getenv("API_PASSWORD"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
-@app.websocket("/ws/{code}")
-async def websocket_endpoint(websocket: WebSocket, code: str):
-    await manager.connect(websocket)
-    logger.info(f"WebSocket connection accepted for game: {code}")
-    try:
-        while True:
-            data = await websocket.receive_text()
-            logger.info(f"Received data: {data}")
-            await websocket.send_text(f"Echo: {data}")
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        logger.info(f"WebSocket disconnected for game: {code}")
+@sio.event
+async def connect(sid, environ):
+    logger.info(f"Client connected: {sid}")
+
+@sio.event
+async def disconnect(sid):
+    logger.info(f"Client disconnected: {sid}")
 
 @app.post("/create_game/", dependencies=[Depends(verify_api_key)])
 async def create_game(game: Game):
@@ -136,7 +112,7 @@ async def add_guess(code: str, guess: Guess):
 
         games_collection.update_one({"code": code}, {"$set": {"user_guesses": game["user_guesses"], "won": game_won}})
         broadcast_message = json.dumps({"guess": guess.dict(), "game_won": game_won}, default=str)
-        await manager.broadcast(broadcast_message)
+        await sio.emit('new_guess', broadcast_message)
         return {"message": "Guess added", "guess": guess.dict(), "game_won": game_won}
     except Exception as e:
         logger.error(f"Error adding guess: {e}")
@@ -168,4 +144,4 @@ async def get_all_games():
 # Run the FastAPI application
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    uvicorn.run(app_sio, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
