@@ -60,3 +60,4 @@ watchfiles==0.22.0
 weasel==0.4.1
 websockets==12.0
 wrapt==1.16.0
+gunicorn
