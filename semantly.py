@@ -10,7 +10,7 @@ def get_embedding(word):
         model="text-embedding-3-large",
         input=word
     )
-    return response['data'][0]['embedding']
+    return response.data[0].embedding
 
 def cosine_similarity(embedding1, embedding2):
     # Calculate cosine similarity between two embeddings
