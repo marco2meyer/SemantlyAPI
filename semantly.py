@@ -6,7 +6,7 @@ import os
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def get_embedding(word):
-    response = openai.Embedding.create(
+    response = openai.embeddings.create()(
         model="text-embedding-3-large",
         input=word
     )
