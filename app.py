@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Requ
 from fastapi.middleware.cors import CORSMiddleware
 import pymongo
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import json
 import os
@@ -50,6 +50,9 @@ class Game(BaseModel):
     user_guesses: List[Guess] = []
     players: List[str]
     won: bool = False
+    timestamp: datetime = None
+    active: int = 1
+    pooled_guesses: int = 0
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -97,6 +100,10 @@ async def websocket_endpoint(websocket: WebSocket, code: str):
 @app.post("/create_game/", dependencies=[Depends(verify_api_key)])
 async def create_game(game: Game):
     try:
+        game.timestamp = datetime.utcnow()
+        if game.pooled_guesses is None:
+            game.pooled_guesses = 0
+
         for guess in game.preset_guesses:
             guess.score = similarity(guess.guess, game.secret_word) * 100
             guess.timestamp = datetime.utcnow()
@@ -154,15 +161,26 @@ async def get_guesses(code: str):
         logger.error(f"Error fetching user guesses: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-@app.get("/games")
-async def get_all_games():
+@app.get("/get_active_games")
+async def get_active_games():
     try:
-        games = list(games_collection.find())
+        games = list(games_collection.find({"active": 1}))
         for game in games:
             game["_id"] = str(game["_id"])
         return games
     except Exception as e:
-        logger.error(f"Error fetching all games: {e}")
+        logger.error(f"Error fetching active games: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@app.post("/deactivate_game", dependencies=[Depends(verify_api_key)])
+async def deactivate_game(code: str):
+    try:
+        result = games_collection.update_one({"code": code}, {"$set": {"active": 0}})
+        if result.matched_count == 0:
+            return {"message": "Game not found"}
+        return {"message": "Game deactivated"}
+    except Exception as e:
+        logger.error(f"Error deactivating game: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # Run the FastAPI application
